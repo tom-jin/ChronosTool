@@ -247,7 +247,7 @@ class CBM:
 
 	def send( self, cmd ):
 		self.device.write( cmd.tostr() )
-		time.sleep( 0.015 )
+		time.sleep( 0.005 ) #time.sleep( 0.015 )
 		if opt.verbose:
 			print >> sys.stderr, 'SENT:', cmd.tohex()
 		response = bytearray( self.device.read( 3 ) )
@@ -441,7 +441,7 @@ class CBM:
 	def spl_status( self ):
 		self.spl_start()
 		self.sync_start()
-		# self.sync_readbuffer() # Dummy read to clean buffer
+		self.sync_readbuffer() # Dummy read to clean buffer
 
 		payload = bytearray( 0x13 )
 		payload[0x00] = 0x02
@@ -452,17 +452,17 @@ class CBM:
 			self.sync_stop()
 			sys.exit()
 		else:
-			print "Requesting watch data."
+			print "Requesting watch status."
 
 		status = 0
-		for i in range(10):
-			time.sleep( 0.1 )
+		for i in range(100):
+			# time.sleep( 0.1 )
 			status = self.sync_getbufferstatus()
 			if status[0] == 1:
 				break
 
 		if status[0] == 1:
-			print "Received watch status information."
+			print "Received watch status."
 		else:
 			print "Watch did not respond."
 			self.sync_stop()
@@ -495,10 +495,79 @@ class CBM:
 		sensor = {"Temperature" : Temperature, "Altitude" : Altitude}
 		log = {"LogMode" : LogMode, "LogInterval" : LogInterval, "LogBytes" : LogBytes}
 		WatchData = {"Time" : rtc, "Alarm" : alarm, "Sensors" : sensor, "Datalog" : log}
-		print json.dumps(WatchData, indent=1)
 
 		time.sleep( 2 )
 		self.sync_stop()
+		return WatchData
+
+	def spl_download( self ):
+		status = self.spl_status()
+		self.spl_start()
+		datalogbytes = status["Datalog"]["LogBytes"]
+
+		if datalogbytes == 0:
+			print "Nothing to download."
+			self.sync_stop()
+			sys.exit()
+
+		print "Requesting watch data."
+		self.sync_readbuffer() # Dummy read to clean buffer
+
+		packets_max = 8192/16
+		packet_start = 0
+		packet_end = (0x9DFF-0x8000)/16
+		packets_expected = datalogbytes + 1
+		packets_per_burst = 50
+		packets_recieved = 0
+
+		packet = ["m"] * packets_max
+
+		for i in range(0,packets_expected,packets_per_burst):
+			start_hi = (i >> 8) & 0xFF
+			start_lo = i & 0xFF
+			if packet_end > i + packets_per_burst:
+				end_hi = ((i + packets_per_burst - 1) >> 8) & 0xFF
+				end_lo = (i + packets_per_burst - 1) & 0xFF
+			else:
+				end_hi = (packet_end >> 8) & 0xFF
+				end_lo = packet_end & 0xFF
+
+			command = bytearray( 0x13 )
+			command[0x00] = 0x04
+			command[0x01] = start_hi
+			command[0x02] = start_lo
+			command[0x03] = end_hi
+			command[0x04] = end_lo
+			result = self.sendcmd( 0x31, command ).payload
+			status = 0
+			for i in range(160):
+				# time.sleep( 0.1 ) # This is useless. You just miss packets this way.
+				status = self.sync_getbufferstatus()
+				if status[0] == 1:
+					data = self.sync_readbuffer()
+					idx = (data[0x01] << 8 ) + data[0x02]
+					if idx > 512: # Sanity check
+						continue
+					try:
+						if packet[idx] == "m":
+							packet[idx] = data[3:19]
+							packets_recieved += 1
+					except IndexError:
+						continue # 512 slips past the sanity check. Why?!
+						# print '\r>> Received %d %%' % (100*packets_recieved/512),
+						# sys.stdout.flush()
+
+		out = bytearray()
+		for row in packet[0:packets_expected]:
+			if row == "m":
+				print "Response corrupt."
+				self.sync_stop()
+				sys.exit()
+			else:
+				out += row
+		print "Received watch data."
+		self.sync_stop()
+		return out
 
 	def transmitburst( self, data ):
 		self.wbsl_start()
@@ -777,7 +846,14 @@ elif command == "sync":
 	bm.spl_sync()
 elif command == "status":
 	bm = CBM( opt.device )
-	bm.spl_status()
+	print json.dumps(bm.spl_status(), indent=1)
+elif command == "download":
+	bm = CBM( opt.device )
+	data = bm.spl_download()
+	timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S.bin")
+	file = open(timestamp,"wb")
+	file.write(data)
+	file.close()
 elif command == "prg":
 	if len( args ) < 2:
         	print >> sys.stderr, "ERROR: prg requires file name as argument"
