@@ -61,7 +61,7 @@ import serial
 import time
 import datetime
 import struct
-import json
+import json, pprint
 
 ###################################################################################################
 class CBMcmd():
@@ -412,8 +412,6 @@ class CBM:
 
 	def spl_sync( self, dt=[], celsius=0, meters=0 ):
 		self.spl_start()
-		raw_input("Put your watch in sync mode, wait a few seconds, and press return...")
-		time.sleep( 2 )
 
 		if not dt:
 			dt = datetime.datetime.now()
@@ -450,7 +448,7 @@ class CBM:
 		if result == 0:
 			print "Failed to send command."
 			self.sync_stop()
-			sys.exit()
+			return None
 		else:
 			print "Requesting watch status."
 
@@ -466,14 +464,14 @@ class CBM:
 		else:
 			print "Watch did not respond."
 			self.sync_stop()
-			sys.exit()
+			return None
 
 		data = self.sync_readbuffer()
 
 		if data[0x04] == 0x00: # Sanity check
 			print "Response corrupt."
 			self.sync_stop()
-			sys.exit()
+			return None
 
 		Status = data[0x00]
 		Hours = data[0x01] & 0x7F
@@ -502,7 +500,10 @@ class CBM:
 
 	def spl_download( self ):
 		status = self.spl_status()
+		if status == None:
+			return None
 		self.spl_start()
+		self.sync_start()
 		datalogbytes = status["Datalog"]["LogBytes"]
 
 		if datalogbytes == 0:
@@ -568,6 +569,18 @@ class CBM:
 		print "Received watch data."
 		self.sync_stop()
 		return out
+
+	def spl_erase(self):
+		self.spl_start()
+		command = bytearray( 0x13 )
+		command[0x00] = 0x06
+		result = self.sendcmd( 0x31, command ).payload
+
+	def spl_goodbye(self):
+		self.spl_start()
+		command = bytearray( 0x13 )
+		command[0x00] = 0x07
+		result = self.sendcmd( 0x31, command ).payload
 
 	def transmitburst( self, data ):
 		self.wbsl_start()
@@ -847,13 +860,20 @@ elif command == "sync":
 elif command == "status":
 	bm = CBM( opt.device )
 	print json.dumps(bm.spl_status(), indent=1)
+elif command == "erase":
+	bm = CBM( opt.device )
+	bm.spl_erase()
+elif command == "goodbye":
+	bm = CBM( opt.device )
+	bm.spl_goodbye()
 elif command == "download":
 	bm = CBM( opt.device )
 	data = bm.spl_download()
-	timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S.bin")
-	file = open(timestamp,"wb")
-	file.write(data)
-	file.close()
+	if data != None:
+		timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S.bin")
+		file = open(timestamp,"wb")
+		file.write(data)
+		file.close()
 elif command == "prg":
 	if len( args ) < 2:
         	print >> sys.stderr, "ERROR: prg requires file name as argument"
