@@ -11,35 +11,35 @@
 #
 # *************************************************************************************************
 #
-#       Copyright (C) 2010 Texas Instruments Incorporated - http://www.ti.com/ 
-#        
-#        
-#         Redistribution and use in source and binary forms, with or without 
-#         modification, are permitted provided that the following conditions 
+#       Copyright (C) 2010 Texas Instruments Incorporated - http://www.ti.com/
+#
+#
+#         Redistribution and use in source and binary forms, with or without
+#         modification, are permitted provided that the following conditions
 #         are met:
-#       
-#           Redistributions of source code must retain the above copyright 
+#
+#           Redistributions of source code must retain the above copyright
 #           notice, this list of conditions and the following disclaimer.
-#        
+#
 #           Redistributions in binary form must reproduce the above copyright
-#           notice, this list of conditions and the following disclaimer in the 
-#           documentation and/or other materials provided with the   
+#           notice, this list of conditions and the following disclaimer in the
+#           documentation and/or other materials provided with the
 #           distribution.
-#        
+#
 #           Neither the name of Texas Instruments Incorporated nor the names of
 #           its contributors may be used to endorse or promote products derived
 #           from this software without specific prior written permission.
-#       
-#         THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
-#         "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
+#
+#         THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+#         "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 #         LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-#         A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
-#         OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
-#         SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
+#         A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+#         OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#         SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
 #         LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
 #         DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-#         THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
-#         (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
+#         THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+#         (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #         OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # *************************************************************************************************
@@ -60,6 +60,8 @@ import os
 import serial
 import time
 import datetime
+import struct
+import json
 
 ###################################################################################################
 class CBMcmd():
@@ -69,7 +71,7 @@ class CBMcmd():
 		self.opcode = opcode
 		self.payload = bytearray( payload )
 		self.len = len( self.payload ) + 3
-	
+
 	def opcode( self, opcode ):
 		self.opcode = opcode
 
@@ -227,15 +229,15 @@ class CBM:
 		#opt will be decomissioned by the time __del__ is called
 		self.optverbose = opt.verbose
 		self.device = serial.Serial( device_name, 115200, timeout = 1 )
-		self.allstatus()
-		if opt.reset:
-			self.reset()
-			self.allstatus()
-		#Original Chronos tool reads twice
-		response = self._wbsl_getmaxpayload()
-		response = self._wbsl_getmaxpayload()
-		CBMburst.setmaxlen( response.payload[0] )
-		self.allstatus()
+		# self.allstatus()
+		# if opt.reset:
+		# 	self.reset()
+		# 	self.allstatus()
+		# #Original Chronos tool reads twice
+		# response = self._wbsl_getmaxpayload()
+		# response = self._wbsl_getmaxpayload()
+		# CBMburst.setmaxlen( response.payload[0] )
+		# self.allstatus()
 
 	def __del__( self ):
 		if self.optverbose:
@@ -281,9 +283,12 @@ class CBM:
 	def _sync_start( self ):
 		return self.sendcmd( 0x30 )		#BM_SYNC_Start
 
+	def _sync_stop( self ):
+		return self.sendcmd( 0x07 )		#BM_SYNC_Stop
+
 	def _sync_getbufferstatus( self ):
 		return self.sendcmd( 0x32, [0x00] )	#BM_SYNC_GetBufferStatus
-	
+
 	def _sync_readbuffer( self ):
 		return self.sendcmd( 0x33, [0x00] )	#BM_SYNC_ReadBuffer
 
@@ -306,7 +311,7 @@ class CBM:
 		self._reset()
 		return self._getstatus()
 
-	def spl_start( self ): 
+	def spl_start( self ):
 		return self._spl_start()
 
 	def spl_getdata( self ):
@@ -361,8 +366,14 @@ class CBM:
 	def sync_start( self ):
 		return self._sync_start().payload
 
+	def sync_stop( self ):
+		return self._sync_start().payload
+
 	def sync_getbufferstatus( self ):
 		return self._sync_getbufferstatus().payload
+
+	def sync_readbuffer( self ):
+		return self._sync_readbuffer().payload
 
 	def wbsl_start( self ):
 		#self.spl_stop()
@@ -371,7 +382,7 @@ class CBM:
 		#time.sleep( 1.0 )
 		ret = self._wbsl_start().payload
 		time.sleep( 0.1 )
-		return ret	
+		return ret
 
 	def wbsl_stop( self ):
 		return self._wbsl_stop().payload
@@ -387,7 +398,7 @@ class CBM:
 
 	def allstatus( self ):
 		return [self.getstatus(), self.wbsl_getstatus(), self.wbsl_getpacketstatus()]
-		
+
 	def sendburst( self, burst ):
 		for payload in burst.topayloads():
 			ret = self.send( payload.tocmd( 0x47 ) )
@@ -425,7 +436,69 @@ class CBM:
 
 		self.sendcmd( 0x31, payload ) #BM_SYNC_SendCommand
 		time.sleep( 2 )
-		self.spl_stop()
+		# self.spl_stop()
+
+	def spl_status( self ):
+		self.spl_start()
+		self.sync_start()
+		# self.sync_readbuffer() # Dummy read to clean buffer
+
+		payload = bytearray( 0x13 )
+		payload[0x00] = 0x02
+
+		result = self.sendcmd( 0x31, payload ).payload
+		if result == 0:
+			print "Failed to send command."
+			self.sync_stop()
+			sys.exit()
+		else:
+			print "Requesting watch data."
+
+		status = 0
+		for i in range(10):
+			time.sleep( 0.1 )
+			status = self.sync_getbufferstatus()
+			if status[0] == 1:
+				break
+
+		if status[0] == 1:
+			print "Received watch status information."
+		else:
+			print "Watch did not respond."
+			self.sync_stop()
+			sys.exit()
+
+		data = self.sync_readbuffer()
+
+		if data[0x04] == 0x00: # Sanity check
+			print "Response corrupt."
+			self.sync_stop()
+			sys.exit()
+
+		Status = data[0x00]
+		Hours = data[0x01] & 0x7F
+		Minutes = data[0x02]
+		Seconds = data[0x03]
+		Year = (data[0x04] << 8 ) + data[0x05]
+		Month = data[0x06]
+		Day = data[0x07]
+		AlarmHours = data[0x08]
+		AlarmMinutes = data[0x09]
+		Temperature = float((data[0x0a] << 8 ) + data[0x0b])/10
+		Altitude = (data[0x0c] << 8 ) + data[0x0d]
+		LogMode = data[0x0e]
+		LogInterval = data[0x0f]
+		LogBytes = (data[0x10] << 8 ) + data[0x11] - 0x8000
+
+		rtc = {"Hours" : Hours, "Minutes" : Minutes, "Seconds" : Seconds, "Year" : Year, "Month" : Month, "Day" : Day}
+		alarm = {"AlarmHours" : AlarmHours, "AlarmMinutes" : AlarmMinutes}
+		sensor = {"Temperature" : Temperature, "Altitude" : Altitude}
+		log = {"LogMode" : LogMode, "LogInterval" : LogInterval, "LogBytes" : LogBytes}
+		WatchData = {"Time" : rtc, "Alarm" : alarm, "Sensors" : sensor, "Datalog" : log}
+		print json.dumps(WatchData, indent=1)
+
+		time.sleep( 2 )
+		self.sync_stop()
 
 	def transmitburst( self, data ):
 		self.wbsl_start()
@@ -640,9 +713,9 @@ B2 40 40 A5 40 01 10 01 4D 4A 0C 5C 1C 4C 52 29
 9A 27 3D 40 6C 1E 5C 43 80 00 32 25 4C 4A B0 13
 CE 26 80 00 C6 25 B2 B0 10 00 02 0F FC 2B 10 01
 4D 43 4C 43 80 00 CE 26 80 00 66 27 80 00 2C 27
-80 00 1C 28 10 01 
+80 00 1C 28 10 01
 @FFFE
-30 1D 
+30 1D
 q""" )
 		data = CBMdata()
 		data.importtxt( txtdata )
@@ -651,7 +724,7 @@ q""" )
 		raw_input( "wait for a few seconds and start rfbsl download on the watch..." )
 
 		self.transmitburst( updater )
-		self.transmitburst( data )		
+		self.transmitburst( data )
 		time.sleep( 1 )
 
 ###################################################################################################
@@ -702,6 +775,9 @@ if command == "rfbsl":
 elif command == "sync":
 	bm = CBM( opt.device )
 	bm.spl_sync()
+elif command == "status":
+	bm = CBM( opt.device )
+	bm.spl_status()
 elif command == "prg":
 	if len( args ) < 2:
         	print >> sys.stderr, "ERROR: prg requires file name as argument"
