@@ -811,88 +811,95 @@ q""" )
 
 ###################################################################################################
 # main
+if __name__ == "__main__":
+	from optparse import OptionParser
 
-from optparse import OptionParser
+	usage = "usage: %prog [options] rfbsl|sync|prg|accel [<arguments> ...]"
+	parser = OptionParser( usage=usage, version="%prog "+version )
+	parser.add_option( "-d", "--device", dest="device", metavar="DEVICE",
+			help="specify USB device of Base Module, will guess if ommited" )
+	parser.add_option( "-n", "--noreset", action="store_false", dest="reset", default=True,
+			help="skip Base Module reset, for resuming streaming etc." )
+	parser.add_option( "-r", "--raw", action="store_true", dest="raw", default=False,
+			help="output raw sensor data" )
+	parser.add_option( "-v", "--verbose", action="store_true", dest="verbose", default=False,
+			help="show CBM communication" )
 
-usage = "usage: %prog [options] rfbsl|sync|prg|accel [<arguments> ...]"
-parser = OptionParser( usage=usage, version="%prog "+version )
-parser.add_option( "-d", "--device", dest="device", metavar="DEVICE",
-		help="specify USB device of Base Module, will guess if ommited" )
-parser.add_option( "-n", "--noreset", action="store_false", dest="reset", default=True,
-		help="skip Base Module reset, for resuming streaming etc." )
-parser.add_option( "-r", "--raw", action="store_true", dest="raw", default=False,
-		help="output raw sensor data" )
-parser.add_option( "-v", "--verbose", action="store_true", dest="verbose", default=False,
-		help="show CBM communication" )
+	(opt, args) = parser.parse_args()
 
-(opt, args) = parser.parse_args()
+	#Command must be given
+	if len( args ) == 0:
+		print >> sys.stderr, "ERROR: you must specify a command"
+		sys.exit( 5 )
 
-#Command must be given
-if len( args ) == 0:
-	print >> sys.stderr, "ERROR: you must specify a command"
-	sys.exit( 5 )
+	#If no device option given, try to guess
+	if not opt.device:
+		device_guess = ["/dev/ttyUSB0", "/dev/cu.usbmodem001"]
+		for path in device_guess:
+			if os.path.exists( path ):
+				opt.device = path
+	#Check for device
+	if (not opt.device) or (not os.path.exists( opt.device )):
+		print >> sys.stderr, "ERROR: no Base Module device found, please specify as option"
+		sys.exit( 6 )
 
-#If no device option given, try to guess
-if not opt.device:
-	device_guess = ["/dev/ttyUSB0", "/dev/cu.usbmodem001"]
-	for path in device_guess:
-		if os.path.exists( path ):
-			opt.device = path
-#Check for device
-if (not opt.device) or (not os.path.exists( opt.device )):
-	print >> sys.stderr, "ERROR: no Base Module device found, please specify as option"
-	sys.exit( 6 )
-
-command = args[0]
-if command == "rfbsl":
-	if len( args ) < 2:
-        	print >> sys.stderr, "ERROR: rfbsl requires file name as argument"
-        	sys.exit( 5 )
-	file = args[1]
-	if not os.path.isfile( file ):
-		print >> sys.stderr, "ERROR: cannot open", file
-		sys.exit( 7 )
-	bm = CBM( opt.device )
-	bm.wbsl_download( file )
-elif command == "sync":
-	bm = CBM( opt.device )
-	bm.spl_sync()
-elif command == "status":
-	bm = CBM( opt.device )
-	print json.dumps(bm.spl_status(), indent=1)
-elif command == "erase":
-	bm = CBM( opt.device )
-	bm.spl_erase()
-elif command == "goodbye":
-	bm = CBM( opt.device )
-	bm.spl_goodbye()
-elif command == "download":
-	bm = CBM( opt.device )
-	data = bm.spl_download()
-	if data != None:
-		timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S.bin")
-		file = open(timestamp,"wb")
-		file.write(data)
-		file.close()
-elif command == "prg":
-	if len( args ) < 2:
-        	print >> sys.stderr, "ERROR: prg requires file name as argument"
-        	sys.exit( 5 )
-	file = args[1]
-	if not os.path.isfile( file ):
-		print >> sys.stderr, "ERROR: cannot open", file
-		sys.exit( 7 )
-	bm = CBM( opt.device )
-	bm.wbsl_download( file )
-	bm.spl_sync()
-elif command == "accel":
-        bm = CBM( opt.device )
-        bm.spl_start()
-        while True:
-                data = bm.spl_getaccel()
-                if data[0]:
-                        print str( data[1] ) + " " + str( data[2] ) + " " + str( data[3] )
+	command = args[0]
+	if command == "rfbsl":
+		if len( args ) < 2:
+	        	print >> sys.stderr, "ERROR: rfbsl requires file name as argument"
+	        	sys.exit( 5 )
+		file = args[1]
+		if not os.path.isfile( file ):
+			print >> sys.stderr, "ERROR: cannot open", file
+			sys.exit( 7 )
+		bm = CBM( opt.device )
+		bm.wbsl_download( file )
+	elif command == "sync":
+		bm = CBM( opt.device )
+		bm.spl_sync()
+	elif command == "status":
+		bm = CBM( opt.device )
+		print json.dumps(bm.spl_status(), indent=1)
+	elif command == "erase":
+		bm = CBM( opt.device )
+		bm.spl_erase()
+	elif command == "goodbye":
+		bm = CBM( opt.device )
+		bm.spl_goodbye()
+	elif command == "download":
+		bm = CBM( opt.device )
+		data = bm.spl_download()
+		if data != None:
+			timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S.bin")
+			file = open(timestamp,"wb")
+			file.write(data)
+			file.close()
+	elif command == "prg":
+		if len( args ) < 2:
+	        	print >> sys.stderr, "ERROR: prg requires file name as argument"
+	        	sys.exit( 5 )
+		file = args[1]
+		if not os.path.isfile( file ):
+			print >> sys.stderr, "ERROR: cannot open", file
+			sys.exit( 7 )
+		bm = CBM( opt.device )
+		bm.wbsl_download( file )
+		bm.spl_sync()
+	elif command == "accel":
+	        bm = CBM( opt.device )
+	        bm.spl_start()
+	        while True:
+	                data = bm.spl_getaccel()
+	                if data[0]:
+	                        print str( data[1] ) + " " + str( data[2] ) + " " + str( data[3] )
+	else:
+		print >> sys.stderr, "ERROR: invalid command:", command
+		sys.exit( 4 )
 else:
-	print >> sys.stderr, "ERROR: invalid command:", command
-	sys.exit( 4 )
+	class SupressOptions:
+		def __init__(self, verbose = False, raw = False, reset = False):
+			self.verbose = verbose
+			self.raw = raw
+			self.reset = reset
 
+	opt = SupressOptions()
