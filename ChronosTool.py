@@ -251,9 +251,12 @@ class CBM:
 		if opt.verbose:
 			print >> sys.stderr, 'SENT:', cmd.tohex()
 		response = bytearray( self.device.read( 3 ) )
-		if response[2] > 3:
-			response += bytearray( self.device.read( response[2]-3 ) )
-		self.response = CBMcmd( response[1], response[3:] )
+		try:
+			if response[2] > 3:
+				response += bytearray( self.device.read( response[2]-3 ) )
+			self.response = CBMcmd( response[1], response[3:] )
+		except IndexError:
+			pass
 		if opt.verbose:
 			print >> sys.stderr, 'RECV:', self.response.tohex()
 		return self.response
@@ -467,8 +470,12 @@ class CBM:
 			return None
 
 		data = self.sync_readbuffer()
-
-		if data[0x04] == 0x00: # Sanity check
+		try:
+			if data[0x04] == 0x00: # Sanity check
+				print "Response corrupt."
+				self.sync_stop()
+				return None
+		except IndexError:
 			print "Response corrupt."
 			self.sync_stop()
 			return None
@@ -486,7 +493,9 @@ class CBM:
 		Altitude = (data[0x0c] << 8 ) + data[0x0d]
 		LogMode = data[0x0e]
 		LogInterval = data[0x0f]
-		LogBytes = (data[0x10] << 8 ) + data[0x11] - 0x8000
+		LogBytes = (data[0x10] << 8 ) + data[0x11]
+
+			# LogBytes -= 0x8000 For original firmware.
 
 		rtc = {"Hours" : Hours, "Minutes" : Minutes, "Seconds" : Seconds, "Year" : Year, "Month" : Month, "Day" : Day}
 		alarm = {"AlarmHours" : AlarmHours, "AlarmMinutes" : AlarmMinutes}
@@ -509,16 +518,16 @@ class CBM:
 		if datalogbytes == 0:
 			print "Nothing to download."
 			self.sync_stop()
-			sys.exit()
+			return None
 
 		print "Requesting watch data."
 		self.sync_readbuffer() # Dummy read to clean buffer
 
-		packets_max = 8192/16
+		packets_max = 7168/16
 		packet_start = 0
 		packet_end = (0x9DFF-0x8000)/16
-		packets_expected = datalogbytes + 1
-		packets_per_burst = 50
+		packets_expected = min((datalogbytes/16),packets_max)
+		packets_per_burst = 20
 		packets_recieved = 0
 
 		packet = ["m"] * packets_max
@@ -557,16 +566,43 @@ class CBM:
 						continue # 512 slips past the sanity check. Why?!
 						# print '\r>> Received %d %%' % (100*packets_recieved/512),
 						# sys.stdout.flush()
+		for i in range(packets_expected):
+			if packet[i] == "m":
+				command = bytearray( 0x13 )
+				command[0x00] = 0x05
+				command[0x01] = (i >> 8) & 0xFF
+				command[0x02] = i & 0xFF
+				result = self.sendcmd( 0x31, command ).payload
+				for i in range(160):
+					# time.sleep( 0.1 ) # This is useless. You just miss packets this way.
+					status = self.sync_getbufferstatus()
+					if status[0] == 1:
+						data = self.sync_readbuffer()
+						idx = (data[0x01] << 8 ) + data[0x02]
+						if idx > 512: # Sanity check
+							continue
+						try:
+							if packet[idx] == "m":
+								packet[idx] = data[3:19]
+								packets_recieved += 1
+						except IndexError:
+							continue # 512 slips past the sanity check. Why?!
+							# print '\r>> Received %d %%' % (100*packets_recieved/512),
+							# sys.stdout.flush()
 
 		out = bytearray()
 		for row in packet[0:packets_expected]:
 			if row == "m":
 				print "Response corrupt."
 				self.sync_stop()
-				sys.exit()
+				pprint.pprint(packet)
+				return None
 			else:
 				out += row
 		print "Received watch data."
+		command = bytearray( 0x13 ) #TEMP
+		command[0x00] = 0x06
+		self.sendcmd( 0x31, command ).payload
 		self.sync_stop()
 		return out
 
@@ -802,8 +838,8 @@ q""" )
 		data = CBMdata()
 		data.importtxt( txtdata )
 
-		print "Put your watch in rfbsl \"open\" mode and press return. Afterwards,"
-		raw_input( "wait for a few seconds and start rfbsl download on the watch..." )
+		print "Put your watch in rfbsl mode."
+
 
 		self.transmitburst( updater )
 		self.transmitburst( data )
