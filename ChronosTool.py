@@ -452,8 +452,8 @@ class CBM:
 			print "Failed to send command."
 			self.sync_stop()
 			return None
-		else:
-			print "Requesting watch status."
+		# else:
+		# 	print "Requesting watch status."
 
 		status = 0
 		for i in range(100):

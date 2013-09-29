@@ -4,3 +4,7 @@
 *.pyc
 
 .DS_Store
+
+*.csv
+
+*.out
